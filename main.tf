@@ -38,15 +38,15 @@ module "eks_nodes" {
 # ===================================================================
 # 3. READ EXISTING CLUSTER OIDC (SAFE - NO MODIFICATIONS)
 # ===================================================================
-data "aws_eks_cluster" "existing" {
-  name = module.eks_cluster.cluster_name
-}
 
 data "aws_caller_identity" "current" {}
 
 # ===================================================================
 # 4. IAM ROLE FOR CSI DRIVER (IRSA - SAFE CREATION)
 # ===================================================================
+# REMOVE the entire data "aws_eks_cluster" "existing" block
+
+# Use module output directly for IRSA role
 resource "aws_iam_role" "ebs_csi_driver" {
   name = "${module.eks_cluster.cluster_name}-ebs-csi-driver"
 
@@ -55,13 +55,13 @@ resource "aws_iam_role" "ebs_csi_driver" {
     Statement = [{
       Effect = "Allow"
       Principal = {
-        Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${replace(data.aws_eks_cluster.existing.identity[0].oidc[0].issuer, "https://", "")}"
+        Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${replace(module.eks_cluster.cluster_oidc_issuer_url, "https://", "")}"
       }
       Action = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = {
-          "${replace(data.aws_eks_cluster.existing.identity[0].oidc[0].issuer, "https://", "")}:aud" = "sts.amazonaws.com"
-          "${replace(data.aws_eks_cluster.existing.identity[0].oidc[0].issuer, "https://", "")}:sub" = "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+          "${replace(module.eks_cluster.cluster_oidc_issuer_url, "https://", "")}:aud" = "sts.amazonaws.com"
+          "${replace(module.eks_cluster.cluster_oidc_issuer_url, "https://", "")}:sub" = "system:serviceaccount:kube-system:ebs-csi-controller-sa"
         }
       }
     }]
@@ -71,6 +71,7 @@ resource "aws_iam_role" "ebs_csi_driver" {
     Name = "${module.eks_cluster.cluster_name}-ebs-csi-driver"
   }
 }
+
 
 resource "aws_iam_role_policy_attachment" "ebs_csi_driver_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
@@ -131,7 +132,8 @@ output "region" {
 }
 
 output "cluster_oidc_issuer_url" {
-  value = data.aws_eks_cluster.existing.identity[0].oidc[0].issuer
+  description = "OIDC issuer URL for IRSA (required for addons like EBS CSI)"
+  value       = module.eks_cluster.cluster_oidc_issuer_url
 }
 
 output "node_group_name" {
